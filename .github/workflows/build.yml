@@ -1,0 +1,41 @@
+name: Build DbgPrint
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Release x64
+        run: |
+          msbuild DbgPrint.sln `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
+            /m `
+            /nologo `
+            /verbosity:minimal
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DbgPrint-x64-Release
+          path: |
+            x64/Release/*.exe
+            x64/Release/*.dll
+            x64/Release/*.pdb
+          if-no-files-found: error
+          retention-days: 30
