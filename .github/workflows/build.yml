@@ -20,6 +20,27 @@ jobs:
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
+      - name: Install WTL via NuGet
+        run: |
+          nuget install WTL -Version 10.0.10320 -OutputDirectory "$env:TEMP\nuget"
+          $wtlInclude = (Get-ChildItem "$env:TEMP\nuget" -Recurse -Filter "atlapp.h" | Select-Object -First 1).DirectoryName
+          echo "WTL_INCLUDE=$wtlInclude" >> $env:GITHUB_ENV
+        shell: pwsh
+
+      - name: Inject WTL include via Directory.Build.props
+        run: |
+          $props = @"
+          <Project>
+            <ItemDefinitionGroup>
+              <ClCompile>
+                <AdditionalIncludeDirectories>$($env:WTL_INCLUDE);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+              </ClCompile>
+            </ItemDefinitionGroup>
+          </Project>
+          "@
+          $props | Set-Content -Path "$env:GITHUB_WORKSPACE\Directory.Build.props" -Encoding UTF8
+        shell: pwsh
+
       - name: Build Release x64
         run: |
           msbuild DbgPrint.sln `
