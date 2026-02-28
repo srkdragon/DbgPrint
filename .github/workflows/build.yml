@@ -20,38 +20,32 @@ jobs:
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
-      - name: Install dependencies via NuGet
+      - name: Install WTL via NuGet
         run: |
-          nuget install WTL                                -Version 10.0.10320 -OutputDirectory "$env:TEMP\nuget"
-          nuget install Microsoft.Windows.ImplementationLibrary -OutputDirectory "$env:TEMP\nuget"
-          nuget install Microsoft.Detours                  -OutputDirectory "$env:TEMP\nuget"
+          nuget install WTL -Version 10.0.10320 -OutputDirectory "$env:TEMP\nuget"
+          $wtl = (Get-ChildItem "$env:TEMP\nuget" -Recurse -Filter "atlapp.h" | Select-Object -First 1).DirectoryName
+          echo "WTL_INCLUDE=$wtl" >> $env:GITHUB_ENV
+        shell: pwsh
+
+      - name: Install WIL and Detours via vcpkg
+        run: |
+          vcpkg install wil:x64-windows detours:x64-windows
+          $vcpkgInclude = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\include"
+          echo "VCPKG_INCLUDE=$vcpkgInclude" >> $env:GITHUB_ENV
         shell: pwsh
 
       - name: Inject includes via Directory.Build.props
         run: |
-          $nuget = "$env:TEMP\nuget"
-
-          $wtl     = (Get-ChildItem $nuget -Recurse -Filter "atlapp.h"   | Select-Object -First 1).DirectoryName
-          $wil     = (Get-ChildItem $nuget -Recurse -Filter "resource.h" | Where-Object FullName -like "*wil*" | Select-Object -First 1).DirectoryName
-          # Detours header lives at <root>/include/detours/detours.h — we want <root>/include
-          $detours = (Get-ChildItem $nuget -Recurse -Filter "detours.h"  | Select-Object -First 1).DirectoryName |
-                       Split-Path -Parent
-
-          Write-Host "WTL:     $wtl"
-          Write-Host "WIL:     $wil"
-          Write-Host "Detours: $detours"
-
           $props = @"
           <Project>
             <ItemDefinitionGroup>
               <ClCompile>
-                <AdditionalIncludeDirectories>$wtl;$wil;$detours;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+                <AdditionalIncludeDirectories>$($env:WTL_INCLUDE);$($env:VCPKG_INCLUDE);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
                 <LanguageStandard>stdcpp20</LanguageStandard>
               </ClCompile>
             </ItemDefinitionGroup>
           </Project>
           "@
-
           $props | Set-Content -Path "$env:GITHUB_WORKSPACE\Directory.Build.props" -Encoding UTF8
         shell: pwsh
 
