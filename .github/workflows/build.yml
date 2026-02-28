@@ -9,12 +9,12 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2019  # Use Windows 2019 for better compatibility
     
     strategy:
       matrix:
         configuration: [Debug, Release]
-        platform: [x64, x86]
+        platform: [x64, Win32]
         
     steps:
     - name: Checkout repository
@@ -24,78 +24,59 @@ jobs:
         
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
-      with:
-        msbuild-architecture: x64
         
-    - name: Setup NuGet
-      uses: NuGet/setup-nuget@v2
-      
-    # Install WTL (Windows Template Library)
-    - name: Download and Install WTL
+    - name: Install WTL
+      shell: cmd
+      run: |
+        mkdir C:\WTL
+        cd C:\WTL
+        curl -L -o wtl.zip https://sourceforge.net/projects/wtl/files/latest/download
+        tar -xf wtl.zip
+        dir /s
+        
+    - name: Patch project files for WTL path
       shell: pwsh
       run: |
-        # Create WTL directory
-        $wtlDir = "C:\WTL"
-        New-Item -ItemType Directory -Force -Path $wtlDir
-        
-        # Download WTL 10 from GitHub releases
-        $wtlUrl = "https://github.com/Win32-WTL/Win32-WTL/releases/download/v10.0.10320/WTL10_10320.zip"
-        $wtlZip = "$env:TEMP\WTL10.zip"
-        
-        Write-Host "Downloading WTL..."
-        Invoke-WebRequest -Uri $wtlUrl -OutFile $wtlZip
-        
-        Write-Host "Extracting WTL..."
-        Expand-Archive -Path $wtlZip -DestinationPath $wtlDir -Force
-        
-        # The zip contains a subfolder, move files up
-        $subfolder = Get-ChildItem -Path $wtlDir -Directory | Select-Object -First 1
-        if ($subfolder) {
-          Move-Item -Path "$($subfolder.FullName)\*" -Destination $wtlDir -Force
-          Remove-Item -Path $subfolder.FullName -Force
+        $wtlPath = "C:\WTL\WTL10_10320_Release\include"
+        if (Test-Path "C:\WTL\include") {
+          $wtlPath = "C:\WTL\include"
         }
         
-        # Set environment variable for MSBuild
-        echo "WTLDIR=$wtlDir" >> $env:GITHUB_ENV
-        echo "WTL_INC=$wtlDir\include" >> $env:GITHUB_ENV
+        # Find the actual WTL include path
+        $wtlInclude = Get-ChildItem -Path "C:\WTL" -Recurse -Filter "atlapp.h" | Select-Object -First 1
+        if ($wtlInclude) {
+          $wtlPath = $wtlInclude.DirectoryName
+          Write-Host "Found WTL at: $wtlPath"
+        }
         
-        Write-Host "WTL installed to: $wtlDir"
-        Get-ChildItem -Path "$wtlDir\include" -Filter "*.h" | Select-Object -First 10
+        # Create Directory.Build.props to inject WTL path
+        @"
+        <Project>
+          <PropertyGroup>
+            <WTLPath>$wtlPath</WTLPath>
+            <IncludePath>$(WTLPath);$(IncludePath)</IncludePath>
+          </PropertyGroup>
+        </Project>
+        "@ | Out-File -FilePath "Directory.Build.props" -Encoding UTF8
         
-    # Alternative: Use vcpkg to install WTL
-    - name: Install WTL via vcpkg (alternative method)
-      if: false  # Set to true to use vcpkg instead, or remove the previous step
-      shell: pwsh
-      run: |
-        vcpkg install wtl:x64-windows
-        vcpkg integrate install
-        echo "VCPKG_ROOT=$env:VCPKG_ROOT" >> $env:GITHUB_ENV
+        # Also modify the project files directly if needed
+        $vcxprojFiles = Get-ChildItem -Recurse -Filter "*.vcxproj"
+        foreach ($file in $vcxprojFiles) {
+          $content = Get-Content $file.FullName -Raw
+          # Add WTL path to AdditionalIncludeDirectories if not present
+          if (-not $content.Contains("`$(WTLPath)")) {
+            $content = $content -replace '(<AdditionalIncludeDirectories>)([^<]*)', "`$1`$(WTLPath);`$2"
+            Set-Content -Path $file.FullName -Value $content -NoNewline
+          }
+        }
         
-    - name: Restore NuGet packages
-      run: nuget restore DbgPrint.sln
-      
     - name: Build solution
-      shell: pwsh
-      run: |
-        # Add WTL include path to environment
-        $env:INCLUDE = "$env:WTL_INC;$env:INCLUDE"
-        
-        # Build with additional properties for WTL
-        msbuild DbgPrint.sln `
-          /p:Configuration=${{ matrix.configuration }} `
-          /p:Platform=${{ matrix.platform }} `
-          /p:AdditionalIncludePaths="$env:WTL_INC" `
-          /m `
-          /v:diag
-        
-    - name: Upload build artifacts
+      run: msbuild DbgPrint.sln /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }} /m
+      
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
-      if: always()
       with:
         name: DbgPrint-${{ matrix.configuration }}-${{ matrix.platform }}
         path: |
           ${{ matrix.platform }}/${{ matrix.configuration }}/*.exe
-          ${{ matrix.platform }}/${{ matrix.configuration }}/*.dll
           ${{ matrix.platform }}/${{ matrix.configuration }}/*.pdb
-          **/*.log
-        if-no-files-found: warn
