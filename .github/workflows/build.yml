@@ -34,19 +34,28 @@ jobs:
           echo "VCPKG_INCLUDE=$vcpkgInclude" >> $env:GITHUB_ENV
         shell: pwsh
 
-      - name: Inject includes via Directory.Build.props
+      - name: Write Directory.Build.props
         run: |
-          $props = @"
-          <Project>
-            <ItemDefinitionGroup>
-              <ClCompile>
-                <AdditionalIncludeDirectories>$($env:WTL_INCLUDE);$($env:VCPKG_INCLUDE);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-                <LanguageStandard>stdcpp20</LanguageStandard>
-              </ClCompile>
-            </ItemDefinitionGroup>
-          </Project>
-          "@
-          $props | Set-Content -Path "$env:GITHUB_WORKSPACE\Directory.Build.props" -Encoding UTF8
+          $xml  = '<Project>'
+          $xml += '<ItemDefinitionGroup>'
+          $xml += '<ClCompile>'
+          $xml += "<AdditionalIncludeDirectories>$env:WTL_INCLUDE;$env:VCPKG_INCLUDE;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>"
+          $xml += '</ClCompile>'
+          $xml += '</ItemDefinitionGroup>'
+          $xml += '</Project>'
+          Set-Content "$env:GITHUB_WORKSPACE\Directory.Build.props" $xml -Encoding UTF8
+        shell: pwsh
+
+      - name: Write Directory.Build.targets
+        run: |
+          $xml  = '<Project>'
+          $xml += '<ItemDefinitionGroup>'
+          $xml += '<ClCompile>'
+          $xml += '<LanguageStandard>stdcpp20</LanguageStandard>'
+          $xml += '</ClCompile>'
+          $xml += '</ItemDefinitionGroup>'
+          $xml += '</Project>'
+          Set-Content "$env:GITHUB_WORKSPACE\Directory.Build.targets" $xml -Encoding UTF8
         shell: pwsh
 
       - name: Build Release x64
